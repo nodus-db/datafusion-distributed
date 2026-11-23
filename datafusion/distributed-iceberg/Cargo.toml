@@ -28,5 +28,5 @@ tokio-stream = "0.1"
 datafusion-distributed-iceberg-test-tools = { path = "../distributed-iceberg-test-tools" }
 tempfile = "3"
 insta = "1"
-parquet = "59"
+parquet = "60"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
