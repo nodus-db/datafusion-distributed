@@ -343,7 +343,6 @@ mod tests {
                 num: 0,
                 workers: vec![worker.url.clone()],
                 runtime_stats: None,
-                dynamic_filter_anchors: vec![],
             };
             Ok(Self {
                 pool: WorkerConnectionPool::new(1),
