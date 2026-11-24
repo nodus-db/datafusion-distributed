@@ -216,7 +216,7 @@ fn send_metrics_via_channel(
     // the actual counters live on its inner variant execs, so merge those in here.
     let mut task_metrics = task_data_metrics.to_metrics_set();
     let _ = plan.apply_with_dt_ctx(dt_ctx, |node, _| {
-        if let Some(leaf) = node.as_any().downcast_ref::<DistributedLeafExec>() {
+        if let Some(leaf) = node.downcast_ref::<DistributedLeafExec>() {
             for variant in leaf.variants() {
                 if let Some(v) = variant.metrics() {
                     for metric in v.iter() {
