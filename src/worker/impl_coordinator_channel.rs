@@ -1,15 +1,15 @@
 use crate::common::TreeNodeExt;
 use crate::events::{WorkerPlanRewriteEvent, WorkerPlanRewriteHandlers};
-use crate::execution_plans::SamplerExec;
+use crate::execution_plans::{DistributedLeafExec, SamplerExec};
 use crate::protocol::LocalWorkerContext;
-use crate::work_unit_feed::{RemoteWorkUnitFeedRegistry, set_work_unit_received_time};
+use crate::work_unit_feed::{set_work_unit_received_time, RemoteWorkUnitFeedRegistry};
 use crate::worker::task_data::TaskDataMetrics;
 use crate::{
     CoordinatorToWorkerMsg, DistributedConfig, DistributedExt, DistributedTaskContext,
     SetPlanRequest, TaskData, TaskMetrics, Worker, WorkerQueryContext, WorkerToCoordinatorMsg,
 };
 use datafusion::common::tree_node::TreeNodeRecursion;
-use datafusion::common::{DataFusionError, Result, exec_datafusion_err};
+use datafusion::common::{exec_datafusion_err, DataFusionError, Result};
 use datafusion::execution::SessionStateBuilder;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::SessionConfig;
@@ -210,9 +210,27 @@ fn send_metrics_via_channel(
         Ok(TreeNodeRecursion::Continue)
     });
 
+    // Surface the leaf source exec's per-node metrics (row counters, fragments pruned) in the
+    // stage-level task_metrics so the coordinator's stage header rendering shows them. On the
+    // worker the leaf is a DistributedLeafExec whose own `node.metrics()` is empty on this pin;
+    // the actual counters live on its inner variant execs, so merge those in here.
+    let mut task_metrics = task_data_metrics.to_metrics_set();
+    let _ = plan.apply_with_dt_ctx(dt_ctx, |node, _| {
+        if let Some(leaf) = node.as_any().downcast_ref::<DistributedLeafExec>() {
+            for variant in leaf.variants() {
+                if let Some(v) = variant.metrics() {
+                    for metric in v.iter() {
+                        task_metrics.push(Arc::clone(metric));
+                    }
+                }
+            }
+        }
+        Ok(TreeNodeRecursion::Continue)
+    });
+
     // Ignore send errors — the coordinator channel may have been dropped (e.g. query cancelled).
     let _ = metrics_tx.send(TaskMetrics {
         pre_order_plan_metrics,
-        task_metrics: task_data_metrics.to_metrics_set(),
+        task_metrics,
     });
 }
