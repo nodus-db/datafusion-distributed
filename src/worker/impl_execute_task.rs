@@ -1,18 +1,17 @@
-use crate::distributed_planner::ProducerHead;
-use crate::worker::worker_service::Worker;
 use crate::ExecuteTaskRequest;
 use crate::LocalWorkerContext;
+use crate::distributed_planner::ProducerHead;
+use crate::worker::worker_service::Worker;
 use datafusion::arrow::array::RecordBatch;
 use datafusion::common::exec_datafusion_err;
-use datafusion::common::{exec_err, Result};
+use datafusion::common::{Result, exec_err};
 use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use futures::stream::Stream;
-use futures::StreamExt;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::task::{Context as TaskCx, Poll};
 use std::time::Duration;
 
@@ -121,6 +120,8 @@ impl Worker {
             .map_err(DataFusionError::Shared)?;
         task_data.task_data_metrics.mark_execution_started_once();
 
+        // ProducerHead is not Copy and plan() takes it by value: derive the exchange kind first.
+        let kind = exchange_kind(&request.producer_head);
         let plan = task_data.plan(request.producer_head)?;
         let task_ctx = task_data.task_ctx;
         let partition_count = plan.properties().partitioning.partition_count();
@@ -138,10 +139,8 @@ impl Worker {
             bytes: AtomicU64::new(0),
             live: AtomicUsize::new(0),
             line: format!(
-                "DFD-SQL-EXCHANGE query={} attempt=- node={node} worker={} kind={}",
-                request.task_key.query_id,
-                request.task_key.task_number,
-                exchange_kind(&request.producer_head),
+                "DFD-SQL-EXCHANGE query={} attempt=- node={node} worker={} kind={kind}",
+                request.task_key.query_id, request.task_key.task_number,
             ),
         });
         for partition in request.target_partition_start..request.target_partition_end {
