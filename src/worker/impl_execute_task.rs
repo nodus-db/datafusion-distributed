@@ -1,17 +1,17 @@
-use crate::ExecuteTaskRequest;
-use crate::LocalWorkerContext;
 use crate::distributed_planner::ProducerHead;
 use crate::worker::worker_service::Worker;
+use crate::ExecuteTaskRequest;
+use crate::LocalWorkerContext;
 use datafusion::arrow::array::RecordBatch;
 use datafusion::common::exec_datafusion_err;
-use datafusion::common::{Result, exec_err};
+use datafusion::common::{exec_err, Result};
 use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use futures::stream::Stream;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context as TaskCx, Poll};
 use std::time::Duration;
 
@@ -67,8 +67,10 @@ impl Stream for ExchangeProbe {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut TaskCx<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-        let inner = &mut this.inner;
-        match Pin::new(&mut **inner).poll_next(cx) {
+        // `inner` is itself a pinned boxed stream (`SendableRecordBatchStream`); poll it through
+        // `as_mut()`. Re-pinning `&mut **inner` would need the trait object to be `Unpin`, which it
+        // is not (E0277 on the pinned fork rev a452171).
+        match this.inner.as_mut().poll_next(cx) {
             Poll::Ready(Some(Ok(batch))) => {
                 // rows = records crossing this boundary (produced side); bytes = the in-memory
                 // payload handed to the transport, before compression (arrow would-be-encoded size).
